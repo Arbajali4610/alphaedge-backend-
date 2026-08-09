@@ -1,0 +1,15 @@
+import path from 'node:path';
+import crypto from 'node:crypto';
+import protobuf from 'protobufjs';
+import WebSocket from 'ws';
+const root=await protobuf.load(path.join(process.cwd(),'src','schema.proto'));const FeedResponse=root.lookupType('com.upstox.marketdatafeeder.rpc.proto.FeedResponse');
+const instruments={nifty:process.env.UPSTOX_NIFTY_KEY||'NSE_INDEX|Nifty 50',sensex:process.env.UPSTOX_SENSEX_KEY||'BSE_INDEX|SENSEX',banknifty:process.env.UPSTOX_BANKNIFTY_KEY||'NSE_INDEX|Nifty Bank'};
+const namesByKey=Object.fromEntries(Object.entries(instruments).map(([n,k])=>[k,n]));let ws=null,reconnectTimer=null,connected=false;const clients=new Set();
+let last={connected:false,nifty:{ltp:null,changePct:null,ltt:null},sensex:{ltp:null,changePct:null,ltt:null},banknifty:{ltp:null,changePct:null,ltt:null},timestamp:null};
+const pct=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b!==0?((a-b)/b)*100:null;
+const broadcast=()=>{const p=JSON.stringify(last);for(const r of clients){try{r.write(`data: ${p}\n\n`)}catch{}}};
+async function authorize(){const token=process.env.UPSTOX_ACCESS_TOKEN;if(!token||token==='PASTE_ACCESS_TOKEN_HERE')throw Error('UPSTOX_ACCESS_TOKEN is not configured');const r=await fetch('https://api.upstox.com/v3/feed/market-data-feed/authorize',{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}});if(!r.ok)throw Error(`Upstox authorize failed: ${r.status}`);const d=await r.json();if(!d?.data?.authorized_redirect_uri)throw Error('No authorized websocket URI returned by Upstox');return d.data.authorized_redirect_uri;}
+function schedule(){if(reconnectTimer)return;reconnectTimer=setTimeout(()=>{reconnectTimer=null;connect().catch(()=>schedule())},5000)}
+function parseMessage(data){try{const msg=FeedResponse.decode(new Uint8Array(data));const json=FeedResponse.toObject(msg,{longs:Number,enums:String,defaults:false});for(const[key,feed]of Object.entries(json.feeds||{})){const name=namesByKey[key],ltpc=feed?.ltpc;if(!name||!ltpc)continue;const ltp=Number(ltpc.ltp),cp=Number(ltpc.cp);last[name]={ltp:Number.isFinite(ltp)?ltp:null,changePct:pct(ltp,cp),ltt:Number(ltpc.ltt)||null};}last.connected=connected;last.timestamp=Date.now();broadcast();}catch{}}
+async function connect(){if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;const uri=await authorize();ws=new WebSocket(uri,{followRedirects:true});ws.binaryType='arraybuffer';ws.on('open',()=>{connected=true;last.connected=true;broadcast();ws.send(Buffer.from(JSON.stringify({guid:crypto.randomUUID(),method:'sub',data:{mode:'ltpc',instrumentKeys:Object.values(instruments)}})));});ws.on('message',parseMessage);ws.on('close',()=>{connected=false;last.connected=false;broadcast();schedule()});ws.on('error',()=>{connected=false;last.connected=false});}
+export function startMarketStream(){connect().catch(()=>schedule())}export function getMarket(){return last}export function addSseClient(res){clients.add(res);res.write(`data: ${JSON.stringify(last)}\n\n`);return()=>clients.delete(res)}

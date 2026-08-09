@@ -1,0 +1,1 @@
+export default function cookieParser(){return (req,_res,next)=>{const raw=req.headers.cookie||'';const out={};for(const part of raw.split(';')){const i=part.indexOf('=');if(i<0)continue;out[part.slice(0,i).trim()]=decodeURIComponent(part.slice(i+1).trim());}req.cookies=out;next();};}
