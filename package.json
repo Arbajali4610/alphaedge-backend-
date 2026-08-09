@@ -2,14 +2,23 @@
   "name": "alphaedge-backend",
   "version": "1.0.0",
   "private": true,
-  "scripts": {"start":"node src/server.js","dev":"node --watch src/server.js"},
-  "engines": {"node": ">=20"},
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "bcryptjs": "^3.0.2",
+    "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
+    "express-session": "^1.18.1",
+    "pg": "^8.16.3",
     "protobufjs": "^7.4.0",
+    "upstox-js-sdk": "^2.18.0",
     "ws": "^8.18.0"
   }
 }
