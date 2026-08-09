@@ -1,0 +1,6 @@
+syntax = "proto3";
+package com.upstox.marketdatafeeder.rpc.proto;
+message LTPC { double ltp=1; int64 ltt=2; int64 ltq=3; double cp=4; }
+message Feed { oneof feed_union { LTPC ltpc=1; } }
+enum Type { initial_feed=0; live_feed=1; }
+message FeedResponse { Type type=1; map<string,Feed> feeds=2; }

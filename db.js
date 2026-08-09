@@ -1,0 +1,19 @@
+import Database from 'better-sqlite3';
+import crypto from 'node:crypto';
+import path from 'node:path';
+import fs from 'node:fs';
+const dataDir=path.resolve(process.env.DATA_DIR||path.join(process.cwd(),'data'));fs.mkdirSync(dataDir,{recursive:true});
+const db=new Database(path.join(dataDir,'alphaedge.db'));db.pragma('journal_mode=WAL');
+db.exec(`CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,mobile TEXT NOT NULL UNIQUE,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);CREATE TABLE IF NOT EXISTS sessions(id INTEGER PRIMARY KEY AUTOINCREMENT,token_hash TEXT NOT NULL UNIQUE,client_db_id INTEGER NOT NULL,expires_at TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(client_db_id) REFERENCES clients(id) ON DELETE CASCADE);CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,client_db_id INTEGER,course TEXT NOT NULL,utr TEXT NOT NULL,slip_name TEXT NOT NULL,slip_path TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(client_db_id) REFERENCES clients(id) ON DELETE SET NULL);`);
+const now=()=>new Date().toISOString(), hashToken=t=>crypto.createHash('sha256').update(t).digest('hex');
+export function nextClientId(){const row=db.prepare('SELECT client_id FROM clients ORDER BY id DESC LIMIT 1').get();if(!row)return'AE100001';const n=Number(String(row.client_id).replace(/^AE/,''))||100000;return'AE'+String(n+1).padStart(6,'0');}
+export function createClient({name,mobile,email,passwordHash}){const clientId=nextClientId(),t=now();const r=db.prepare('INSERT INTO clients(client_id,name,mobile,email,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(clientId,name,mobile,email,passwordHash,t,t);return db.prepare('SELECT id,client_id,name,mobile,email,created_at,updated_at FROM clients WHERE id=?').get(r.lastInsertRowid);}
+export function findClientByClientId(id){return db.prepare('SELECT * FROM clients WHERE client_id=?').get(id)}
+export function findClientByContact(contact){const c=String(contact||'').trim().toLowerCase(),m=c.replace(/\D/g,'');return db.prepare('SELECT * FROM clients WHERE lower(email)=? OR mobile=?').get(c,m)}
+export function findClientById(id){return db.prepare('SELECT * FROM clients WHERE id=?').get(id)}
+export function publicClient(c){return c?{client_id:c.client_id,name:c.name,mobile:c.mobile,email:c.email}:null}
+export function updateClient(id,{name,mobile,email,passwordHash}){const t=now();if(passwordHash)db.prepare('UPDATE clients SET name=?,mobile=?,email=?,password_hash=?,updated_at=? WHERE id=?').run(name,mobile,email,passwordHash,t,id);else db.prepare('UPDATE clients SET name=?,mobile=?,email=?,updated_at=? WHERE id=?').run(name,mobile,email,t,id);return publicClient(findClientById(id));}
+export function createSession(clientDbId,days=7){const token=crypto.randomBytes(32).toString('hex'),expires=new Date(Date.now()+days*86400000).toISOString();db.prepare('INSERT INTO sessions(token_hash,client_db_id,expires_at,created_at) VALUES(?,?,?,?)').run(hashToken(token),clientDbId,expires,now());return{token,expires};}
+export function getSession(token){if(!token)return null;const row=db.prepare('SELECT s.*,c.client_id,name,mobile,email,password_hash FROM sessions s JOIN clients c ON c.id=s.client_db_id WHERE s.token_hash=?').get(hashToken(token));if(!row)return null;if(Date.parse(row.expires_at)<=Date.now()){db.prepare('DELETE FROM sessions WHERE id=?').run(row.id);return null;}return row;}
+export function deleteSession(token){if(token)db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hashToken(token));}
+export function savePayment(x){return db.prepare('INSERT INTO payments(client_db_id,course,utr,slip_name,slip_path,created_at) VALUES(?,?,?,?,?,?)').run(x.clientDbId||null,x.course,x.utr,x.slipName,x.slipPath,now());}
